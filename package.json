@@ -1,0 +1,44 @@
+{
+  "name": "exam-game",
+  "version": "1.0.0",
+  "description": "考研游戏系统 - 把学习做成游戏",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "vue-router": "^4.3.0",
+    "pinia": "^2.1.0",
+    "echarts": "^5.5.0",
+    "electron-store": "^8.1.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.4.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0",
+    "concurrently": "^8.2.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.exam-game.app",
+    "productName": "考研游戏系统",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": null
+    }
+  }
+}
