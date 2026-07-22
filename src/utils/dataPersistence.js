@@ -10,11 +10,21 @@ const DATA_VERSION = 1
 
 export async function loadData() {
   if (isElectron) {
-    const raw = await window.electronAPI.store.getAll()
-    return raw || {}
+    try {
+      const raw = await window.electronAPI.store.getAll()
+      return raw || {}
+    } catch (err) {
+      console.error('[数据持久化] 加载数据失败:', err)
+      return {}
+    }
   } else {
-    const data = localStorage.getItem('exam-game-data')
-    return data ? JSON.parse(data) : {}
+    try {
+      const data = localStorage.getItem('exam-game-data')
+      return data ? JSON.parse(data) : {}
+    } catch (err) {
+      console.error('[数据持久化] 加载数据失败:', err)
+      return {}
+    }
   }
 }
 
@@ -23,12 +33,34 @@ export async function saveData(data) {
   data._version = DATA_VERSION
 
   if (isElectron) {
-    for (const [key, value] of Object.entries(data)) {
-      await window.electronAPI.store.set(key, value)
+    try {
+      // 通过 JSON 序列化去除 Vue 响应式代理，确保 IPC 可以克隆
+      const plain = JSON.parse(JSON.stringify(data))
+      for (const [key, value] of Object.entries(plain)) {
+        await window.electronAPI.store.set(key, value)
+      }
+    } catch (err) {
+      console.error('[数据持久化] 保存数据失败:', err)
     }
   } else {
-    localStorage.setItem('exam-game-data', JSON.stringify(data))
+    try {
+      localStorage.setItem('exam-game-data', JSON.stringify(data))
+    } catch (err) {
+      console.error('[数据持久化] 保存数据失败:', err)
+    }
   }
+}
+
+// 只读取用户数据（排除备份和内部字段）
+async function loadUserData() {
+  const allData = await loadData()
+  const userData = {}
+  for (const [key, value] of Object.entries(allData)) {
+    if (!key.startsWith('backup_') && key !== '_version') {
+      userData[key] = value
+    }
+  }
+  return userData
 }
 
 // ============ 版本迁移 ============
@@ -97,35 +129,40 @@ export function startAutoBackup(intervalMs = 300000) { // 默认5分钟
 }
 
 export async function createBackup() {
-  const data = await loadData()
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupKey = `backup_${timestamp}`
+  try {
+    // 只备份用户数据，不包含之前的备份
+    const userData = await loadUserData()
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const backupKey = `backup_${timestamp}`
 
-  if (isElectron) {
-    await window.electronAPI.store.set(backupKey, {
-      ...data,
-      _backupTime: new Date().toISOString()
-    })
+    if (isElectron) {
+      await window.electronAPI.store.set(backupKey, {
+        ...userData,
+        _backupTime: new Date().toISOString()
+      })
 
-    // 清理旧备份，只保留最近10个
-    const allData = await window.electronAPI.store.getAll()
-    const backups = Object.keys(allData)
-      .filter(k => k.startsWith('backup_'))
-      .sort()
-      .reverse()
+      // 清理旧备份，只保留最近10个
+      const allData = await window.electronAPI.store.getAll()
+      const backups = Object.keys(allData)
+        .filter(k => k.startsWith('backup_'))
+        .sort()
+        .reverse()
 
-    for (const oldBackup of backups.slice(10)) {
-      await window.electronAPI.store.delete(oldBackup)
+      for (const oldBackup of backups.slice(10)) {
+        await window.electronAPI.store.delete(oldBackup)
+      }
+    } else {
+      const backups = JSON.parse(localStorage.getItem('exam-game-backups') || '[]')
+      backups.unshift({
+        key: backupKey,
+        time: new Date().toISOString(),
+        data: userData
+      })
+      // 只保留最近5个备份
+      localStorage.setItem('exam-game-backups', JSON.stringify(backups.slice(0, 5)))
     }
-  } else {
-    const backups = JSON.parse(localStorage.getItem('exam-game-backups') || '[]')
-    backups.unshift({
-      key: backupKey,
-      time: new Date().toISOString(),
-      data: data
-    })
-    // 只保留最近5个备份
-    localStorage.setItem('exam-game-backups', JSON.stringify(backups.slice(0, 5)))
+  } catch (err) {
+    console.error('[数据持久化] 创建备份失败:', err)
   }
 }
 
@@ -152,7 +189,17 @@ export async function restoreBackup(backupKey) {
   }
 
   if (backupData) {
-    await saveData(backupData)
+    // 先备份当前数据
+    await createBackup()
+
+    // 清除所有旧数据，只写入备份中的用户数据
+    const cleanData = {}
+    for (const [key, value] of Object.entries(backupData)) {
+      if (!key.startsWith('backup_') && key !== '_backupTime') {
+        cleanData[key] = value
+      }
+    }
+    await saveData(cleanData)
     return true
   }
   return false
@@ -161,18 +208,11 @@ export async function restoreBackup(backupKey) {
 // ============ 导入/导出 ============
 
 export async function exportData() {
-  const data = await loadData()
-  // 不导出备份和内部字段
-  const exportObj = {}
-  for (const [key, value] of Object.entries(data)) {
-    if (!key.startsWith('backup_') && key !== '_version') {
-      exportObj[key] = value
-    }
-  }
-  exportObj._version = DATA_VERSION
-  exportObj._exportTime = new Date().toISOString()
+  const data = await loadUserData()
+  data._version = DATA_VERSION
+  data._exportTime = new Date().toISOString()
 
-  const json = JSON.stringify(exportObj, null, 2)
+  const json = JSON.stringify(data, null, 2)
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
 
@@ -200,8 +240,14 @@ export async function importData(file) {
         // 先备份当前数据
         await createBackup()
 
-        // 写入导入的数据
-        await saveData(data)
+        // 清除所有旧数据，只写入导入的数据
+        const cleanData = {}
+        for (const [key, value] of Object.entries(data)) {
+          if (!key.startsWith('backup_') && key !== '_exportTime') {
+            cleanData[key] = value
+          }
+        }
+        await saveData(cleanData)
         resolve(data)
       } catch (err) {
         reject(err)
