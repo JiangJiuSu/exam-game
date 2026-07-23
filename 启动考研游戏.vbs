@@ -111,27 +111,44 @@ WshShell.Run "cmd /c taskkill /f /im electron.exe >nul 2>&1", 0, True
 WshShell.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr :5173 ^| findstr LISTENING') do taskkill /f /pid %a >nul 2>&1", 0, True
 
 ' ============================================
-' Step 5: Start the app (capture output)
+' Step 5: Start Vite in background
 ' ============================================
-logFile.WriteLine "[5] Starting npm run electron:dev..."
-Dim appLog
-appLog = strPath & "\app.log"
+logFile.WriteLine "[5] Starting Vite dev server..."
+WshShell.Run "cmd /c cd /d """ & strPath & """ && npx vite", 0, False
 
-' Use Exec to capture output
-On Error Resume Next
-Set execObj = WshShell.Exec("cmd /c cd /d """ & strPath & """ && npm run electron:dev >""" & appLog & """ 2>&1")
-If Err.Number <> 0 Then
-    logFile.WriteLine "  Exec failed: " & Err.Description
-    Err.Clear
-    ' Fallback: use Run
-    WshShell.Run "cmd /c cd /d """ & strPath & """ && npm run electron:dev >""" & appLog & """ 2>&1", 0, False
+' Wait for Vite to be ready (check port 5173)
+Dim viteReady, waitCount
+viteReady = False
+waitCount = 0
+Do While Not viteReady And waitCount < 30
+    WScript.Sleep 1000
+    waitCount = waitCount + 1
+    On Error Resume Next
+    Dim portCheck
+    Set portCheck = WshShell.Exec("cmd /c netstat -an | findstr :5173 | findstr LISTENING")
+    Dim portOutput
+    portOutput = portCheck.StdOut.ReadAll()
+    If Len(Trim(portOutput)) > 0 Then viteReady = True
+    On Error GoTo 0
+Loop
+
+logFile.WriteLine "  Vite ready: " & viteReady & " (waited " & waitCount & "s)"
+
+If Not viteReady Then
+    MsgBox "Vite dev server failed to start!" & vbCrLf & "Check if port 5173 is occupied.", vbCritical, "Exam Game"
+    logFile.Close
+    WScript.Quit
 End If
-On Error GoTo 0
 
-' Wait a few seconds for the app to start
-WScript.Sleep 8000
+' ============================================
+' Step 6: Start Electron
+' ============================================
+logFile.WriteLine "[6] Starting Electron..."
+WshShell.Run "cmd /c cd /d """ & strPath & """ && npx electron .", 0, False
 
-' Check if Electron is running
+' Wait and check
+WScript.Sleep 5000
+
 Dim electronRunning
 electronRunning = False
 On Error Resume Next
@@ -144,22 +161,8 @@ On Error GoTo 0
 
 logFile.WriteLine "  electron running: " & electronRunning
 
-' Log the app output
-If objFSO.FileExists(appLog) Then
-    Dim appContent
-    Set appContent = objFSO.OpenTextFile(appLog, 1)
-    If Not appContent.AtEndOfStream Then
-        Dim appLines
-        appLines = appContent.ReadAll()
-        ' Log first 2000 chars
-        If Len(appLines) > 2000 Then appLines = Left(appLines, 2000)
-        logFile.WriteLine "  app output: " & appLines
-    End If
-    appContent.Close
-End If
-
 If Not electronRunning Then
-    MsgBox "App failed to start!" & vbCrLf & "Check app.log for details.", vbCritical, "Exam Game"
+    MsgBox "Electron failed to start!", vbCritical, "Exam Game"
 End If
 
 logFile.WriteLine "=== Done ==="

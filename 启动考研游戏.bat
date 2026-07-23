@@ -84,14 +84,28 @@ if not exist "node_modules" (
 )
 
 :: ============================================
-:: Step 4: Start the app
+:: Step 4: Start Vite in background
 :: ============================================
-echo Starting app...
-npm run electron:dev
+echo Starting Vite dev server...
+start /b cmd /c "npx vite"
+
+:: Wait for Vite to be ready
+echo Waiting for Vite (port 5173)...
+:waitloop
+timeout /t 1 /nobreak >nul
+netstat -an | findstr ":5173" | findstr "LISTENING" >nul 2>&1
+if errorlevel 1 goto waitloop
+echo Vite is ready!
+
+:: ============================================
+:: Step 5: Start Electron
+:: ============================================
+echo Starting Electron...
+npx electron .
 if errorlevel 1 (
     echo.
     echo ====================================
-    echo   Failed to start! Check Node.js.
+    echo   Failed to start Electron!
     echo ====================================
     pause
 )
