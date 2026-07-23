@@ -104,11 +104,63 @@ Else
 End If
 
 ' ============================================
-' Step 4: Start the app
+' Step 4: Kill any leftover Vite/Electron processes
 ' ============================================
-logFile.WriteLine "[4] Starting app..."
-WshShell.Run "cmd /c cd /d """ & strPath & """ && npm run electron:dev", 1, True
-logFile.WriteLine "  app launched."
+logFile.WriteLine "[4] Cleaning up old processes..."
+WshShell.Run "cmd /c taskkill /f /im electron.exe >nul 2>&1", 0, True
+WshShell.Run "cmd /c for /f ""tokens=5"" %a in ('netstat -aon ^| findstr :5173 ^| findstr LISTENING') do taskkill /f /pid %a >nul 2>&1", 0, True
+
+' ============================================
+' Step 5: Start the app (capture output)
+' ============================================
+logFile.WriteLine "[5] Starting npm run electron:dev..."
+Dim appLog
+appLog = strPath & "\app.log"
+
+' Use Exec to capture output
+On Error Resume Next
+Set execObj = WshShell.Exec("cmd /c cd /d """ & strPath & """ && npm run electron:dev >""" & appLog & """ 2>&1")
+If Err.Number <> 0 Then
+    logFile.WriteLine "  Exec failed: " & Err.Description
+    Err.Clear
+    ' Fallback: use Run
+    WshShell.Run "cmd /c cd /d """ & strPath & """ && npm run electron:dev >""" & appLog & """ 2>&1", 0, False
+End If
+On Error GoTo 0
+
+' Wait a few seconds for the app to start
+WScript.Sleep 8000
+
+' Check if Electron is running
+Dim electronRunning
+electronRunning = False
+On Error Resume Next
+Dim checkObj
+Set checkObj = WshShell.Exec("cmd /c tasklist /fi ""imagename eq electron.exe"" /nh")
+Dim checkOutput
+checkOutput = checkObj.StdOut.ReadAll()
+If InStr(checkOutput, "electron.exe") > 0 Then electronRunning = True
+On Error GoTo 0
+
+logFile.WriteLine "  electron running: " & electronRunning
+
+' Log the app output
+If objFSO.FileExists(appLog) Then
+    Dim appContent
+    Set appContent = objFSO.OpenTextFile(appLog, 1)
+    If Not appContent.AtEndOfStream Then
+        Dim appLines
+        appLines = appContent.ReadAll()
+        ' Log first 2000 chars
+        If Len(appLines) > 2000 Then appLines = Left(appLines, 2000)
+        logFile.WriteLine "  app output: " & appLines
+    End If
+    appContent.Close
+End If
+
+If Not electronRunning Then
+    MsgBox "App failed to start!" & vbCrLf & "Check app.log for details.", vbCritical, "Exam Game"
+End If
 
 logFile.WriteLine "=== Done ==="
 logFile.Close
