@@ -4,33 +4,38 @@ title 考研游戏系统
 
 cd /d "%~dp0"
 
+echo Setting npm mirror for China...
+npm config set registry https://registry.npmmirror.com >nul 2>&1
+
 if not exist "node_modules" (
     echo ====================================
-    echo   首次运行，正在安装依赖...
-    echo   这可能需要1-2分钟时间，请耐心等待。
+    echo   First run: installing dependencies...
+    echo   This may take 1-2 minutes.
     echo ====================================
     echo.
     npm install
     if errorlevel 1 (
         echo.
         echo ====================================
-        echo   安装失败！请检查是否已安装 Node.js
-        echo   下载地址: https://nodejs.org/
+        echo   Install failed!
+        echo   Please install Node.js first:
+        echo   https://nodejs.org/
         echo ====================================
         pause
         exit /b 1
     )
     echo.
-    echo   依赖安装完成！正在启动应用...
+    echo   Dependencies installed! Starting app...
     echo.
 )
 
-echo 正在启动应用...
+echo Starting app...
 npm run electron:dev
 if errorlevel 1 (
     echo.
     echo ====================================
-    echo   启动失败！请检查 Node.js 是否正常
+    echo   Failed to start!
+    echo   Please check Node.js installation.
     echo ====================================
     pause
 )
